@@ -1,0 +1,99 @@
+#!/usr/bin/env python3
+import os
+import sys
+import hashlib
+import tempfile
+import email
+import email.policy
+import codecs
+import string
+from html.parser import HTMLParser
+from typing import Tuple
+
+
+class DeHTMLParser(HTMLParser):
+    def __init__(self):
+        HTMLParser.__init__(self)
+        self.__text = []
+
+    def handle_data(self, data):
+        self.__text.append(data)
+
+    def handle_starttag(self, tag, attrs):
+        pass
+
+    def handle_startendtag(self, tag, attrs):
+        pass
+
+    def text(self):
+        return ''.join(self.__text)
+
+
+def html_handler(data, h):
+    parser = DeHTMLParser()
+    parser.feed(data.decode('hash-mail'))
+    parser.close()
+    h.update(parser.text().encode())
+
+
+def default_handler(data, h):
+    h.update(data)
+
+
+_decode_table = {ord(x): x for x in string.printable}
+def custom_decode(binary: bytes) -> Tuple[str, int]:
+    # example decoder that converts non ASCII to '.'
+    return ''.join(_decode_table.get(x, '.') for x in binary), len(binary)
+
+
+def custom_search_function(encoding_name):
+    return codecs.CodecInfo(None, custom_decode, name='hash-mail')
+
+
+def hash_email_from_data(data):
+    handlers = {
+        'text/html': html_handler,
+    }
+    h = hashlib.sha256()
+    eml = email.message_from_bytes(data, policy=email.policy.default)
+    print('Hashing', file=sys.stderr, end='')
+    for field in ['From', 'Subject']:
+        try:
+            field_val = eml.get(field, 'Unknown ' + field)
+            print(f' |{field_val}|', file=sys.stderr, end='')
+            h.update(field_val.encode())
+        except:
+            print(f' |skipped {field}|', file=sys.stderr, end='')
+    for part in eml.walk():
+        if part.is_multipart():
+            continue
+        ct = part.get_content_type()
+        handler = handlers.get(ct, default_handler)
+        handler(part.get_payload(i=None, decode=True), h)
+    digest = h.hexdigest()
+    print(f' => {digest}', file=sys.stderr)
+    print(digest)
+
+
+if __name__ == '__main__':
+    codecs.register(custom_search_function)
+    data = sys.stdin.buffer.raw.readall()
+    # Fail hard if running in test environment
+    try:
+        hash_email_from_data(data)
+    except:
+        print(f'XXX error in hash-mail', file=sys.stderr)
+        is_test_mode = os.environ.get('TEST_HMAIL')
+        if is_test_mode is not None:
+            sys.exit(1)
+        fails_folder = os.environ.get('HMAIL_FAIL_DIR')
+        if fails_folder is None:
+            print(f'  not saving input', file=sys.stderr)
+        else:
+            tempfile.tempdir = fails_folder
+            fd, file_name = tempfile.mkstemp()
+            os.write(fd, data)
+            os.close(fd)
+            print(f'  saved input to {file_name} XXX', file=sys.stderr)
+    sys.exit(0)
+
