@@ -31,9 +31,13 @@ class DeHTMLParser(HTMLParser):
 
 def html_handler(data, h):
     parser = DeHTMLParser()
-    parser.feed(data.decode('hash-mail'))
-    parser.close()
-    h.update(parser.text().encode())
+    text = data.decode('hash-mail')
+    try:
+        parser.feed(text)
+        parser.close()
+    except:
+        print(f' |BAD HTML| ', file=sys.stderr, end='')
+    h.update(text.encode())
 
 
 def default_handler(data, h):
